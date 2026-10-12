@@ -1,6 +1,6 @@
 // Gioco disponibile anche offline: i file dell'app e il dizionario restano in cache.
 // Cambia VERSION a ogni aggiornamento, così i dispositivi scaricano i file nuovi.
-const VERSION = "passaparola-v3";
+const VERSION = "passaparola-v4";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "board.js", "game.js", "online.js", "firebase-config.js",
   "parole.txt", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
@@ -34,10 +34,22 @@ self.addEventListener("fetch", e => {
     }
     return;
   }
-  // File dell'app: cache, aggiornata in background quando c'è rete
+  // Dizionario e icone: dalla cache (non cambiano quasi mai); il resto dell'app: prima la rete,
+  // così dopo un aggiornamento arriva subito il codice nuovo, e la cache serve solo offline.
+  const cacheFirst = /\/(parole\.txt|icons\/)/.test(url.pathname);
   e.respondWith(caches.open(VERSION).then(async c => {
     const hit = await c.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then(res => { if (res.ok) c.put(e.request, res.clone()); return res; }).catch(() => hit);
-    return hit || net;
+    if (cacheFirst && hit) return hit;
+    try {
+      const res = await Promise.race([
+        fetch(e.request, { cache: "no-cache" }),
+        new Promise((_, no) => setTimeout(() => no(new Error("lenta")), hit ? 4000 : 30000)),
+      ]);
+      if (res.ok) c.put(e.request, res.clone());
+      return res;
+    } catch (err) {
+      if (hit) return hit;
+      throw err;
+    }
   }));
 });
