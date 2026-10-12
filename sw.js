@@ -1,6 +1,6 @@
 // Gioco disponibile anche offline: i file dell'app e il dizionario restano in cache.
 // Cambia VERSION a ogni aggiornamento, così i dispositivi scaricano i file nuovi.
-const VERSION = "passaparola-v2";
+const VERSION = "passaparola-v3";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "board.js", "game.js", "online.js", "firebase-config.js",
   "parole.txt", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",

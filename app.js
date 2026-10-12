@@ -38,7 +38,10 @@ $("goOnline").onclick = async () => {
     online.enter();
   } catch (e) {
     $("online").innerHTML = `<div class="panel narrow"><h2>Sfida online non disponibile</h2>
-      <p>Per giocare online serve una connessione a internet. Da soli si gioca anche offline.</p>
+      <p>${navigator.onLine
+        ? "Il modulo online non si è caricato: di solito è un errore in <code>firebase-config.js</code>, che deve contenere solo <code>export const firebaseConfig = { … }</code>."
+        : "Per giocare online serve una connessione a internet. Da soli si gioca anche offline."}</p>
+      <p class="hint-l">${esc(String(e && e.message || e))}</p>
       <div class="row"><button class="ghost" type="button" id="olBack">Indietro</button></div></div>`;
     $("olBack").onclick = goHome;
   }
