@@ -13,10 +13,19 @@ Web app (PWA) installabile su iPhone e Android, gioca anche offline.
 **Da solo o sul tavolo** (anche offline): uno o più giocatori a turno sullo stesso dispositivo, con clessidra e classifica. Se il dizionario rifiuta una parola valida, il tavolo può accettarla a mano.
 
 **Sfida online**: ognuno dal suo dispositivo, stesse lettere per tutti nello stesso momento.
-1. Al primo accesso si sceglie un nickname, che deve essere unico.
+1. Ognuno si crea un profilo con nickname (unico) e password, poi accede da qualunque dispositivo.
 2. Uno crea una stanza e riceve un codice di 4 lettere; gli altri entrano con il codice.
 3. Chi ha creato la stanza lancia i dadi: tutti vedono le stesse lettere e la stessa clessidra, e durante il round si vede quante parole ha trovato ciascuno, ma non quali.
 4. A fine round si vedono le parole di tutti e la classifica; alla fine la classifica finale e la rivincita.
+5. Il profilo tiene le statistiche: partite, vittorie, punti, parola più lunga. Da lì si cambia anche la password.
+
+### Profili e password
+
+- Nickname: da 3 a 16 caratteri tra lettere, numeri e trattino basso; unico senza distinzione tra maiuscole e minuscole, e non modificabile.
+- Password: almeno 10 caratteri, con almeno una maiuscola, una minuscola, un numero e un simbolo.
+- Le password le gestisce Firebase Authentication, che le conserva solo come hash (scrypt): non passano mai dal database del gioco e nessuno può leggerle.
+- Dietro le quinte il nickname diventa un indirizzo interno `nickname@giocatori.passaparola.app`: non è un'email vera, serve solo a Firebase.
+- **Password dimenticata:** non c'è recupero via email. Dalla console Firebase elimina l'utente (Authentication → Users) e il suo nickname (Realtime Database → `nicknames/<nickname>`), poi la persona si registra di nuovo.
 
 ## Pubblicarla con GitHub Pages
 
@@ -25,20 +34,21 @@ Dopo un minuto il gioco è su `https://andpas21.github.io/passaparola/`.
 
 ## Attivare la sfida online (Firebase, gratis)
 
-Da fare una volta sola, circa 10 minuti.
+Da fare una volta sola, circa 15 minuti.
 
 1. Vai su <https://console.firebase.google.com>, **Crea un progetto** (es. `passaparola`). Google Analytics non serve.
-2. **Build → Authentication → Inizia → Sign-in method**: attiva **Anonimo**.
-   Serve a riconoscere ogni dispositivo senza chiedere email o password.
-3. **Build → Realtime Database → Crea database**: posizione **Belgio (europe-west1)**, avvio in **modalità bloccata**.
-4. Nella scheda **Regole** del database incolla il contenuto di [`database.rules.json`](database.rules.json) e premi **Pubblica**.
-5. **Impostazioni progetto** (ingranaggio) → **Le tue app** → icona **Web `</>`** → registra l'app (es. `passaparola-web`, senza Hosting).
+2. **Build → Authentication → Inizia → Sign-in method**: attiva **Email/password** (solo il primo interruttore, non "link via email").
+3. **Authentication → Impostazioni → Criteri delle password**: attiva l'applicazione dei requisiti con lunghezza minima **10** e spunta maiuscole, minuscole, numeri e caratteri non alfanumerici.
+   Così le regole della password valgono anche lato server, non solo nell'app.
+4. **Build → Realtime Database → Crea database**: posizione **Belgio (europe-west1)**, avvio in **modalità bloccata**.
+5. Nella scheda **Regole** del database incolla il contenuto di [`database.rules.json`](database.rules.json) e premi **Pubblica**.
+6. **Impostazioni progetto** (ingranaggio) → **Le tue app** → icona **Web `</>`** → registra l'app (es. `passaparola-web`, senza Hosting).
    Copia l'oggetto `firebaseConfig` che compare.
-6. Incollalo in [`firebase-config.js`](firebase-config.js) al posto di `null` (c'è un esempio nel file), controllando che ci sia anche `databaseURL`.
-7. **Authentication → Impostazioni → Domini autorizzati**: aggiungi `andpas21.github.io`.
-8. In [`sw.js`](sw.js) aumenta `VERSION` (es. `passaparola-v2`) e fai commit: i dispositivi che hanno già il gioco scaricano la versione nuova.
+7. Incollalo in [`firebase-config.js`](firebase-config.js) al posto di `null` (c'è un esempio nel file), controllando che ci sia anche `databaseURL`.
+8. **Authentication → Impostazioni → Domini autorizzati**: aggiungi `andpas21.github.io`.
+9. In [`sw.js`](sw.js) aumenta `VERSION` (es. `passaparola-v2`) e fai commit: i dispositivi che hanno già il gioco scaricano la versione nuova.
 
-La configurazione Firebase non è segreta: a proteggere i dati sono le regole del punto 4, che impediscono di rubare un nickname altrui, di scrivere parole a nome di altri o dopo la fine della clessidra.
+La configurazione Firebase non è segreta: a proteggere i dati sono le regole del punto 5, che impediscono di prendersi il nickname di un altro, di scrivere parole a nome di altri o dopo la fine della clessidra.
 
 ## Provarla in locale
 
@@ -55,7 +65,7 @@ Apri il link in Safari (iPhone) o Chrome (Android) → Condividi / menu → **Ag
 - `game.js` dadi, punteggio, dizionario, lancio
 - `board.js` il tavolo di gioco (dadi, parola, taccuino, clessidra), usato da entrambe le modalità
 - `app.js` avvio, navigazione e partita locale
-- `online.js` sfida online: nickname, stanze, round, classifica
+- `online.js` sfida online: profili, stanze, round, classifica, statistiche
 - `parole.txt` dizionario (circa 118.700 parole da 4 a 9 lettere, senza plurali né nomi propri)
 - `database.rules.json` regole di sicurezza di Firebase
 - `sw.js` + `manifest.webmanifest` funzionamento offline e installazione

@@ -144,3 +144,21 @@ em.you{font-style:normal;font-size:11px;text-transform:uppercase;letter-spacing:
 code{font-family:var(--f-mono);font-size:.9em;background:#00000035;padding:1px 5px;border-radius:4px}
 .row{align-items:center}
 .side .notebook{align-self:stretch}
+/* profilo */
+.tabs{display:flex;gap:4px;background:#00000030;border-radius:10px;padding:4px;margin-bottom:18px}
+.tab{flex:1;background:transparent;color:var(--muted);padding:9px 12px;font-size:14px}
+.tab.on{background:var(--ivory);color:var(--ink)}
+.pwrow{display:flex;gap:8px}
+.pwrow input{flex:1}
+.eye{white-space:nowrap}
+.pwrules{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:4px 12px;font-size:13px;color:var(--muted)}
+.pwrules li::before{content:"○";display:inline-block;width:1.4em;color:var(--muted)}
+.pwrules li.ok{color:var(--good)}
+.pwrules li.ok::before{content:"✓";color:var(--good)}
+.hint-l.tight{margin:-8px 0 0}
+.code.nick{font-size:clamp(32px,9vw,48px);letter-spacing:.02em;overflow-wrap:anywhere}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.stats div{background:#00000030;border-radius:10px;padding:10px 12px}
+.stats .wide{grid-column:1/-1}
+.stats dt{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.stats dd{margin:2px 0 0;font-family:var(--f-mono);font-size:22px;color:var(--ivory);font-variant-numeric:tabular-nums}

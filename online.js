@@ -1,9 +1,13 @@
-// Sfida online con Firebase Realtime Database.
+// Sfida online con Firebase (Authentication + Realtime Database).
+//
+// Profili: nickname + password. Il nickname diventa l'email interna "<nick>@giocatori.passaparola.app",
+// così Firebase Authentication garantisce che sia unico e conserva la password solo come hash (scrypt):
+// la password non passa mai dal nostro database.
 //
 // Dati:
-//   nicknames/{nick in minuscolo} = uid            → garantisce nickname univoci
-//   users/{uid}                    = { nick }
-//   rooms/{CODICE} = { host, created, status: lobby|round|review|done, rounds, time, round, endsAt,
+//   nicknames/{nick in minuscolo} = uid
+//   users/{uid} = { nick, created, stats: { games, wins, points, best }, played/{partita}: true }
+//   rooms/{CODICE} = { host, created, started, status: lobby|round|review|done, rounds, time, round, endsAt,
 //                      rolls/{n}: "LETTERE", players/{uid}: { nick, joined }, words/{n}/{uid}/{parola}: punti }
 import { firebaseConfig } from "./firebase-config.js";
 import { wordsFor, rollDice, bestWords, points, esc } from "./game.js";
@@ -11,6 +15,7 @@ import { openBoard, closeBoard, setOpponents } from "./board.js";
 import { show, setWhoami, goHome, dictReady } from "./app.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/10.12.2/";
+const EMAIL_DOMAIN = "giocatori.passaparola.app";
 const $ = id => document.getElementById(id);
 const view = html => { $("online").innerHTML = html; show("online"); };
 
@@ -18,6 +23,16 @@ let A, D, auth, db, uid = null, nick = null, offset = 0;
 let code = null, room = null, unsub = null, boardRound = null;
 const now = () => Date.now() + offset;
 const r = path => D.ref(db, path);
+const emailFor = n => `${n.toLowerCase()}@${EMAIL_DOMAIN}`;
+
+export const PASSWORD_RULES = [
+  { t: "almeno 10 caratteri", ok: p => p.length >= 10 },
+  { t: "una lettera maiuscola", ok: p => /[A-Z]/.test(p) },
+  { t: "una lettera minuscola", ok: p => /[a-z]/.test(p) },
+  { t: "un numero", ok: p => /[0-9]/.test(p) },
+  { t: "un simbolo (es. ! ? @ # . -)", ok: p => /[^A-Za-z0-9\s]/.test(p) },
+];
+const NICK_RE = /^[A-Za-z0-9_]{3,16}$/;
 
 async function init() {
   if (db) return;
@@ -28,19 +43,22 @@ async function init() {
   const app = F.initializeApp(firebaseConfig);
   auth = A.getAuth(app);
   await new Promise(res => { const off = A.onAuthStateChanged(auth, () => { off(); res(); }); });
-  if (!auth.currentUser) await A.signInAnonymously(auth);
-  uid = auth.currentUser.uid;
   db = D.getDatabase(app);
   D.onValue(r(".info/serverTimeOffset"), s => { offset = s.val() || 0; });
-  nick = (await D.get(r(`users/${uid}/nick`))).val();
+}
+
+async function loadProfile() {
+  const u = auth.currentUser;
+  uid = u && !u.isAnonymous ? u.uid : null;
+  nick = uid ? (await D.get(r(`users/${uid}/nick`))).val() : null;
 }
 
 export async function enter() {
   if (!firebaseConfig) return renderNotConfigured();
   view(`<div class="panel narrow"><p>Collegamento in corso…</p></div>`);
-  try { await init(); await dictReady; }
+  try { await init(); await loadProfile(); await dictReady; }
   catch (e) { return renderError("Non riesco a collegarmi al server di gioco. Controlla la connessione e riprova."); }
-  if (!nick) return renderNick();
+  if (!uid || !nick) return renderAuth("login");
   setWhoami(`Giochi come ${nick}`);
   let saved = null;
   try { saved = localStorage.getItem("pp-room"); } catch (e) {}
@@ -73,48 +91,198 @@ function renderError(msg) {
   $("olRetry").onclick = enter; $("olBack").onclick = goHome;
 }
 
-// --- nickname univoco
-function renderNick() {
+// --- accesso e creazione del profilo
+function pwChecklist(id) {
+  return `<ul class="pwrules" id="${id}">${PASSWORD_RULES.map((x, i) => `<li data-i="${i}">${x.t}</li>`).join("")}</ul>`;
+}
+function bindChecklist(inputId, listId) {
+  const upd = () => {
+    const p = $(inputId).value;
+    document.querySelectorAll(`#${listId} li`).forEach(li => li.classList.toggle("ok", PASSWORD_RULES[+li.dataset.i].ok(p)));
+  };
+  $(inputId).addEventListener("input", upd); upd();
+}
+const passwordOk = p => PASSWORD_RULES.every(x => x.ok(p));
+function eyeToggle(id) {
+  return `<button class="ghost small eye" type="button" data-eye="${id}" aria-label="Mostra password">Mostra</button>`;
+}
+function bindEyes() {
+  document.querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
+    const i = $(b.dataset.eye); const vis = i.type === "password";
+    i.type = vis ? "text" : "password"; b.textContent = vis ? "Nascondi" : "Mostra";
+  });
+}
+
+function authError(e) {
+  const c = e?.code || "";
+  if (/invalid-credential|wrong-password|user-not-found|invalid-email|invalid-login/.test(c)) return "Nickname o password sbagliati.";
+  if (/email-already-in-use/.test(c)) return "Questo nickname è già usato da un altro giocatore.";
+  if (/password-does-not-meet-requirements|weak-password/.test(c)) return "La password non rispetta i requisiti.";
+  if (/too-many-requests/.test(c)) return "Troppi tentativi. Aspetta qualche minuto e riprova.";
+  if (/network/.test(c)) return "Connessione assente. Controlla internet e riprova.";
+  return "Qualcosa è andato storto. Riprova.";
+}
+
+function renderAuth(mode) {
+  const signup = mode === "signup";
   view(`<div class="panel narrow">
-    <h2>${nick ? "Cambia nickname" : "Scegli il tuo nickname"}</h2>
-    <p class="muted">È il nome con cui ti vedono gli altri. Deve essere unico: se qualcuno l'ha già preso, prova un'altra variante.</p>
-    <form id="nickForm" class="stack" novalidate>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" aria-selected="${!signup}" class="tab${signup ? "" : " on"}" id="tabLogin">Accedi</button>
+      <button type="button" role="tab" aria-selected="${signup}" class="tab${signup ? " on" : ""}" id="tabSignup">Crea profilo</button>
+    </div>
+    <form id="authForm" class="stack" novalidate>
       <label class="field"><span class="label">Nickname</span>
-        <input id="nickInput" autocomplete="nickname" autocapitalize="off" spellcheck="false" maxlength="16" value="${esc(nick || "")}" placeholder="es. andrea_pd"></label>
-      <div class="msg ko" id="nickMsg" role="status"></div>
-      <div class="row"><button type="submit" id="nickSave">Conferma</button>${nick ? `<button class="ghost" type="button" id="nickCancel">Annulla</button>` : `<button class="ghost" type="button" id="nickCancel">Indietro</button>`}</div>
-      <p class="hint-l">Da 3 a 16 caratteri: lettere, numeri o trattino basso.</p>
+        <input id="auNick" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="16" placeholder="es. andrea_pd"></label>
+      ${signup ? `<p class="hint-l tight">Da 3 a 16 caratteri: lettere, numeri o trattino basso. Deve essere unico e non si può cambiare.</p>` : ""}
+      <label class="field"><span class="label">Password</span>
+        <span class="pwrow"><input id="auPw" type="password" autocomplete="${signup ? "new-password" : "current-password"}">${eyeToggle("auPw")}</span></label>
+      ${signup ? `${pwChecklist("auRules")}
+      <label class="field"><span class="label">Ripeti la password</span>
+        <input id="auPw2" type="password" autocomplete="new-password"></label>` : ""}
+      <div class="msg ko" id="auMsg" role="status"></div>
+      <div class="row"><button type="submit" id="auGo">${signup ? "Crea profilo" : "Accedi"}</button><button class="ghost" type="button" id="auBack">Indietro</button></div>
+      ${signup ? `<p class="hint-l">La password viene conservata da Firebase solo in forma cifrata: nessuno può leggerla, nemmeno chi gestisce il gioco. Se la dimentichi non si può recuperare, quindi segnatela.</p>` : ""}
     </form></div>`);
-  $("nickCancel").onclick = () => nick ? renderLobby() : goHome();
-  $("nickForm").onsubmit = async e => {
+  $("tabLogin").onclick = () => renderAuth("login");
+  $("tabSignup").onclick = () => renderAuth("signup");
+  $("auBack").onclick = goHome;
+  bindEyes();
+  if (signup) bindChecklist("auPw", "auRules");
+  $("authForm").onsubmit = async e => {
     e.preventDefault();
-    const val = $("nickInput").value.trim();
-    const m = $("nickMsg");
-    if (!/^[A-Za-z0-9_]{3,16}$/.test(val)) { m.textContent = "Usa da 3 a 16 caratteri: lettere, numeri o trattino basso."; return; }
-    $("nickSave").disabled = true; m.textContent = "";
+    const n = $("auNick").value.trim(), pw = $("auPw").value, m = $("auMsg");
+    m.textContent = "";
+    if (!NICK_RE.test(n)) { m.textContent = "Il nickname va da 3 a 16 caratteri: lettere, numeri o trattino basso."; return; }
+    if (signup) {
+      if (!passwordOk(pw)) { m.textContent = "La password non rispetta ancora tutti i requisiti."; return; }
+      if (pw !== $("auPw2").value) { m.textContent = "Le due password non coincidono."; return; }
+    } else if (!pw) { m.textContent = "Scrivi la password."; return; }
+    $("auGo").disabled = true;
     try {
-      await claimNick(val);
+      if (signup) await signUp(n, pw); else await logIn(n, pw);
       setWhoami(`Giochi come ${nick}`);
       renderLobby();
     } catch (err) {
-      m.textContent = err.message === "taken" ? `“${val}” è già usato da un altro giocatore.` : "Non riesco a salvare il nickname. Riprova.";
-      $("nickSave").disabled = false;
+      m.textContent = err.message === "taken" ? `“${n}” è già usato da un altro giocatore.` : authError(err);
+      $("auGo").disabled = false;
     }
   };
-  $("nickInput").focus();
+  $("auNick").focus();
 }
 
-async function claimNick(val) {
-  const key = val.toLowerCase();
-  const owner = (await D.get(r(`nicknames/${key}`))).val();
-  if (owner && owner !== uid) throw new Error("taken");
-  let res;
-  try { res = await D.runTransaction(r(`nicknames/${key}`), cur => (cur === null || cur === uid) ? uid : undefined); }
-  catch (e) { if (/permission/i.test(e.message || e.code || "")) throw new Error("taken"); throw e; }
-  if (!res.committed || res.snapshot.val() !== uid) throw new Error("taken");
-  if (nick && nick.toLowerCase() !== key) await D.remove(r(`nicknames/${nick.toLowerCase()}`)).catch(() => {});
-  await D.set(r(`users/${uid}`), { nick: val });
-  nick = val;
+async function signUp(n, pw) {
+  const key = n.toLowerCase();
+  if ((await D.get(r(`nicknames/${key}`))).exists()) throw new Error("taken");
+  const cred = await A.createUserWithEmailAndPassword(auth, emailFor(n), pw);
+  uid = cred.user.uid;
+  await D.set(r(`nicknames/${key}`), uid);
+  await D.set(r(`users/${uid}`), { nick: n, created: now(), stats: { games: 0, wins: 0, points: 0, best: "" } });
+  nick = n;
+}
+
+async function logIn(n, pw) {
+  await A.signInWithEmailAndPassword(auth, emailFor(n), pw);
+  await loadProfile();
+  if (!nick) {
+    // profilo creato a metà (es. connessione caduta durante la registrazione): lo completiamo
+    await D.set(r(`nicknames/${n.toLowerCase()}`), uid).catch(() => {});
+    await D.set(r(`users/${uid}`), { nick: n, created: now(), stats: { games: 0, wins: 0, points: 0, best: "" } });
+    nick = n;
+  }
+}
+
+async function logOut() {
+  leaveView(); forgetRoom(); closeBoard();
+  await A.signOut(auth).catch(() => {});
+  uid = null; nick = null; code = null; room = null;
+  setWhoami(null);
+  renderAuth("login");
+}
+
+// --- profilo
+async function renderProfile() {
+  leaveView();
+  view(`<div class="panel narrow"><p>Carico il profilo…</p></div>`);
+  const u = (await D.get(r(`users/${uid}`)).catch(() => null))?.val() || {};
+  const st = u.stats || {};
+  const games = st.games || 0;
+  const since = u.created ? new Date(u.created).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "";
+  view(`<div class="setup">
+    <div class="panel stack">
+      <div class="label">Profilo</div>
+      <div class="code nick">${esc(nick)}</div>
+      ${since ? `<p class="muted">Gioca dal ${since}</p>` : ""}
+      <dl class="stats">
+        <div><dt>Partite online</dt><dd>${games}</dd></div>
+        <div><dt>Vittorie</dt><dd>${st.wins || 0}</dd></div>
+        <div><dt>Punti totali</dt><dd>${st.points || 0}</dd></div>
+        <div><dt>Media a partita</dt><dd>${games ? (st.points / games).toLocaleString("it-IT", { maximumFractionDigits: 1 }) : "–"}</dd></div>
+        <div class="wide"><dt>Parola più lunga</dt><dd>${st.best ? esc(st.best.toUpperCase()) : "–"}</dd></div>
+      </dl>
+      <div class="row"><button id="prBack" type="button">Alla sala d'attesa</button><button class="ghost" id="prOut" type="button">Esci dal profilo</button></div>
+    </div>
+    <div class="panel">
+      <h2>Cambia password</h2>
+      <form id="pwForm" class="stack" novalidate>
+        <input type="text" autocomplete="username" value="${esc(nick)}" hidden>
+        <label class="field"><span class="label">Password attuale</span>
+          <span class="pwrow"><input id="pwOld" type="password" autocomplete="current-password">${eyeToggle("pwOld")}</span></label>
+        <label class="field"><span class="label">Nuova password</span>
+          <span class="pwrow"><input id="pwNew" type="password" autocomplete="new-password">${eyeToggle("pwNew")}</span></label>
+        ${pwChecklist("pwRules")}
+        <label class="field"><span class="label">Ripeti la nuova password</span>
+          <input id="pwNew2" type="password" autocomplete="new-password"></label>
+        <div class="msg" id="pwMsg" role="status"></div>
+        <div class="row"><button type="submit" id="pwGo">Salva la nuova password</button></div>
+      </form>
+    </div>
+  </div>`);
+  $("prBack").onclick = renderLobby;
+  $("prOut").onclick = logOut;
+  bindEyes();
+  bindChecklist("pwNew", "pwRules");
+  $("pwForm").onsubmit = async e => {
+    e.preventDefault();
+    const m = $("pwMsg"), oldPw = $("pwOld").value, pw = $("pwNew").value;
+    m.className = "msg ko";
+    if (!oldPw) { m.textContent = "Scrivi la password attuale."; return; }
+    if (!passwordOk(pw)) { m.textContent = "La nuova password non rispetta ancora tutti i requisiti."; return; }
+    if (pw !== $("pwNew2").value) { m.textContent = "Le due password nuove non coincidono."; return; }
+    $("pwGo").disabled = true;
+    try {
+      const user = auth.currentUser;
+      await A.reauthenticateWithCredential(user, A.EmailAuthProvider.credential(user.email, oldPw));
+      await A.updatePassword(user, pw);
+      m.className = "msg ok"; m.textContent = "Password aggiornata.";
+      $("pwForm").reset(); document.querySelectorAll("#pwRules li").forEach(li => li.classList.remove("ok"));
+    } catch (err) {
+      m.textContent = /invalid-credential|wrong-password/.test(err?.code || "") ? "La password attuale è sbagliata." : authError(err);
+    }
+    $("pwGo").disabled = false;
+  };
+}
+
+// Aggiorna le statistiche del profilo una sola volta per partita
+const recorded = new Set();
+async function recordGame() {
+  const gameId = `${code}-${room.started || 0}`;
+  if (recorded.has(gameId) || !room.players?.[uid]) return;
+  recorded.add(gameId);
+  try {
+    if ((await D.get(r(`users/${uid}/played/${gameId}`))).exists()) return;
+    const t = totals(), me = t.find(p => p.id === uid);
+    if (!me) return;
+    const won = t.length > 1 && me.pts === t[0].pts && me.pts > 0;
+    const longest = me.words.reduce((a, w) => w.length > a.length ? w : a, "");
+    await D.runTransaction(r(`users/${uid}/stats`), s => {
+      s = s || { games: 0, wins: 0, points: 0, best: "" };
+      return {
+        games: (s.games || 0) + 1, wins: (s.wins || 0) + (won ? 1 : 0), points: (s.points || 0) + me.pts,
+        best: longest.length > (s.best || "").length ? longest : (s.best || ""),
+      };
+    });
+    await D.set(r(`users/${uid}/played/${gameId}`), true);
+  } catch (e) { recorded.delete(gameId); }
 }
 
 // --- sala d'attesa: crea o entra in una stanza
@@ -143,8 +311,8 @@ function renderLobby() {
       </form>
     </div>
   </div>
-  <div class="row"><button class="ghost small" id="olNick" type="button">Cambia nickname (${esc(nick)})</button><button class="ghost small" id="olHome" type="button">Torna all'inizio</button></div>`);
-  $("olNick").onclick = renderNick;
+  <div class="row"><button class="ghost small" id="olNick" type="button">Il tuo profilo</button><button class="ghost small" id="olHome" type="button">Torna all'inizio</button></div>`);
+  $("olNick").onclick = renderProfile;
   $("olHome").onclick = goHome;
   $("olCreate").onclick = createRoom;
   $("olJoin").onsubmit = e => { e.preventDefault(); joinRoom($("olCode").value.trim().toUpperCase()); };
@@ -256,6 +424,7 @@ async function nextRound() {
   const { roll } = rollDice();
   await D.update(r(`rooms/${code}`), {
     status: "round", round: n, [`rolls/${n}`]: roll.join(""),
+    ...(n === 1 ? { started: now() } : {}),
     endsAt: room.time ? now() + room.time * 1000 + 2000 : 0,
   });
 }
@@ -332,6 +501,7 @@ function rankTable() {
 }
 
 function renderFinal() {
+  recordGame();
   const t = totals(), top = t[0]?.pts ?? 0, winners = t.filter(p => p.pts === top);
   const title = t.length === 1 ? `Hai totalizzato ${top} punti` : winners.length > 1 ? `Pareggio a ${top} punti` : `Vince ${winners[0].nick} con ${top} punti`;
   view(`<div class="panel">
@@ -342,5 +512,5 @@ function renderFinal() {
       <button class="ghost" id="olLeave" type="button">Esci dalla stanza</button></div>
   </div>`);
   $("olLeave").onclick = leaveRoom;
-  if (isHost()) $("olAgain").onclick = () => D.update(r(`rooms/${code}`), { status: "lobby", round: 0, endsAt: 0, rolls: null, words: null });
+  if (isHost()) $("olAgain").onclick = () => D.update(r(`rooms/${code}`), { status: "lobby", round: 0, endsAt: 0, started: null, rolls: null, words: null });
 }
