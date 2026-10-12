@@ -1,0 +1,46 @@
+{
+  "rules": {
+    "nicknames": {
+      ".read": true,
+      "$nick": {
+        ".write": "auth != null && (!data.exists() || data.val() === auth.uid)",
+        ".validate": "newData.val() === auth.uid && $nick.matches(/^[a-z0-9_]{3,16}$/)"
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['nick'])",
+        "nick": {
+          ".validate": "newData.isString() && root.child('nicknames/' + newData.val().toLowerCase()).val() === auth.uid"
+        }
+      }
+    },
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('host').val() === auth.uid) || data.child('host').val() === auth.uid)",
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['nick'])"
+          }
+        },
+        "status": {
+          ".write": "auth != null && data.val() === 'round' && newData.val() === 'review' && data.parent().child('players/' + auth.uid).exists() && data.parent().child('endsAt').val() > 0 && now >= data.parent().child('endsAt').val() - 1000"
+        },
+        "words": {
+          "$n": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && root.child('rooms/' + $code + '/status').val() === 'round' && (root.child('rooms/' + $code + '/endsAt').val() === 0 || now <= root.child('rooms/' + $code + '/endsAt').val() + 3000)",
+              "$word": {
+                ".validate": "$word.matches(/^[a-z]{4,9}$/) && newData.isNumber() && newData.val() === $word.length - 3"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

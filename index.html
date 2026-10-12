@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Passaparola</title>
+<meta name="theme-color" content="#0c2528">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Passaparola">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Figtree:wght@400;600;800&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><button class="brand" id="homeLink" type="button" aria-label="Torna all'inizio">Passa<span>parola</span></button></h1>
+    <p class="sub" id="whoami">9 dadi · parole da 4 lettere in su · solo italiano</p>
+  </header>
+
+  <!-- HOME -->
+  <section id="home" class="setup">
+    <div class="stack">
+      <button class="mode" id="goLocal" type="button">
+        <span class="mode-t">Da solo o sul tavolo</span>
+        <span class="mode-d">Funziona anche offline. Uno o più giocatori a turno sullo stesso dispositivo.</span>
+      </button>
+      <button class="mode" id="goOnline" type="button">
+        <span class="mode-t">Sfida online</span>
+        <span class="mode-d">Ognuno dal suo telefono, stesse lettere per tutti nello stesso momento. Serve un nickname.</span>
+      </button>
+      <div class="dictstate" id="dictstate">Caricamento del dizionario…</div>
+    </div>
+    <div class="panel">
+      <h2>Regole</h2>
+      <ol class="rules">
+        <li>Si lanciano i 9 dadi: ognuno mostra una lettera.</li>
+        <li>Componi parole italiane di almeno 4 lettere. Ogni dado si usa una sola volta per parola.</li>
+        <li>Valgono i verbi in tutte le loro coniugazioni. Non valgono plurali, nomi propri e parole straniere: decide il dizionario.</li>
+        <li>Allo scadere della clessidra si contano i punti.</li>
+      </ol>
+      <div class="scale"><span>4 lettere = 1</span><span>5 = 2</span><span>6 = 3</span><span>7 = 4</span><span>8 = 5</span><span>9 = 6</span></div>
+      <div class="label" style="margin-top:16px">Le facce dei dadi</div>
+      <div class="dicelist" id="dicelist"></div>
+    </div>
+  </section>
+
+  <!-- SETUP LOCALE -->
+  <section id="setup" hidden>
+    <div class="panel narrow">
+      <h2>Partita sul tavolo</h2>
+      <div class="label">Giocatori</div>
+      <div id="players" class="players"></div>
+      <button class="ghost small" id="addPlayer" type="button">+ Aggiungi giocatore</button>
+      <div class="opts">
+        <label><span class="label">Turni a testa</span>
+          <select id="rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option></select></label>
+        <label><span class="label">Clessidra</span>
+          <select id="time"><option value="60">1 minuto</option><option value="120">2 minuti</option><option value="180" selected>3 minuti</option><option value="0">Senza tempo</option></select></label>
+      </div>
+      <div class="row"><button id="start" type="button">Lancia i dadi</button><button class="ghost" data-home type="button">Indietro</button></div>
+      <p class="hint-l">Se il dizionario rifiuta una parola che per voi è valida, il tavolo può accettarla a mano.</p>
+    </div>
+  </section>
+
+  <!-- TAVOLO (locale e online) -->
+  <section id="game" hidden>
+    <div class="hud">
+      <div>
+        <div class="who" id="who"></div>
+        <div class="round" id="round"></div>
+      </div>
+      <div class="timer" id="timer"></div>
+    </div>
+    <div class="board">
+      <div class="tray">
+        <div class="dice" id="dice"></div>
+        <div class="compose">
+          <div class="word" id="word"></div>
+          <div class="msg" id="msg" role="status"></div>
+          <div class="actions">
+            <button id="submit" type="button">Conferma parola</button>
+            <button class="ghost" id="back" type="button" aria-label="Cancella ultima lettera">⌫</button>
+            <button class="ghost" id="clear" type="button">Svuota</button>
+          </div>
+          <div class="actions" id="manualBox" hidden>
+            <button class="ghost small" id="manual" type="button">Il tavolo la accetta</button>
+          </div>
+          <div class="hint">Tocca i dadi oppure scrivi con la tastiera · Invio per confermare</div>
+        </div>
+      </div>
+      <div class="side">
+        <aside class="notebook">
+          <h2>Taccuino <b id="score">0 pt</b></h2>
+          <ul class="found" id="found"></ul>
+          <div class="possible" id="possible"></div>
+          <div class="row"><button class="nb-btn small" id="endTurn" type="button">Termina turno</button></div>
+        </aside>
+        <div class="panel opponents" id="opponents" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINE TURNO LOCALE -->
+  <section id="turnEnd" hidden>
+    <div class="result">
+      <div class="panel stack">
+        <div class="label" id="teWho"></div>
+        <div class="big" id="tePts"></div>
+        <div id="teWords" class="chips"></div>
+        <div class="row"><button id="next" type="button">Avanti</button></div>
+      </div>
+      <div class="panel stack">
+        <h2>Le parole più lunghe possibili</h2>
+        <div id="teBest" class="chips"></div>
+        <div class="label" id="teCount"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CLASSIFICA LOCALE -->
+  <section id="final" hidden>
+    <div class="panel">
+      <h2 id="winner"></h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Giocatore</th><th class="num">Parole</th><th class="num">Più lunga</th><th class="num">Punti</th></tr></thead>
+        <tbody id="ranking"></tbody>
+      </table></div>
+      <div class="row"><button id="again" type="button">Rivincita</button><button class="ghost" id="newGame" type="button">Nuova partita</button></div>
+    </div>
+  </section>
+
+  <!-- ONLINE: contenuto generato da online.js -->
+  <section id="online" hidden></section>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
